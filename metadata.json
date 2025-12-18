@@ -1,0 +1,5 @@
+{
+  "name": "SVG to G-Code Slicer",
+  "description": "Convert SVG files into 3D printable G-Code with visual preview, custom settings, and infill generation.",
+  "requestFramePermissions": []
+}
