@@ -11,6 +11,8 @@ export interface PrinterSettings {
   retractionSpeed: number; // mm/min
   extrusionMultiplier: number;
   zOffset: number; // mm
+  bedWidth: number; // mm
+  bedDepth: number; // mm
 }
 
 export interface ModelSettings {

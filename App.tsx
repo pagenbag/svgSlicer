@@ -17,6 +17,8 @@ const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   retractionSpeed: 40 * 60,
   extrusionMultiplier: 1.0,
   zOffset: 0,
+  bedWidth: 220,
+  bedDepth: 220,
 };
 
 const DEFAULT_MODEL_SETTINGS: ModelSettings = {
@@ -153,6 +155,10 @@ export default function App() {
               Printer Settings
             </h2>
             <div className="space-y-1">
+              <div className="grid grid-cols-2 gap-2">
+                <InputGroup label="Bed Width" value={printerSettings.bedWidth} onChange={(v: number) => setPrinterSettings({...printerSettings, bedWidth: v})} suffix="mm" step={10} />
+                <InputGroup label="Bed Depth" value={printerSettings.bedDepth} onChange={(v: number) => setPrinterSettings({...printerSettings, bedDepth: v})} suffix="mm" step={10} />
+              </div>
               <InputGroup label="Nozzle Diameter" value={printerSettings.nozzleDiameter} onChange={(v: number) => setPrinterSettings({...printerSettings, nozzleDiameter: v})} suffix="mm" />
               <InputGroup label="Filament Diameter" value={printerSettings.filamentDiameter} onChange={(v: number) => setPrinterSettings({...printerSettings, filamentDiameter: v})} suffix="mm" />
               <InputGroup label="Layer Height" value={printerSettings.layerHeight} onChange={(v: number) => setPrinterSettings({...printerSettings, layerHeight: v})} suffix="mm" />
@@ -218,7 +224,7 @@ export default function App() {
           )}
 
           <div className="flex-1 relative">
-             <GCodeViewer gcode={gcode} />
+             <GCodeViewer gcode={gcode} bedWidth={printerSettings.bedWidth} bedDepth={printerSettings.bedDepth} />
           </div>
           
           <div className="mt-4 flex justify-between items-center text-xs text-slate-500">
