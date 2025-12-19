@@ -50,28 +50,64 @@ export const generateGCode = async (
 
       if (modelSettings.isPlotterMode) {
           // Density Hashing for Shades
-          // Layer 1: Dark (0-80) - Cross hatch 45/-45
-          // Layer 2: Mid (80-160) - Diagonal 45
-          // Layer 3: Light (160-220) - Sparse Diagonal 45
+          const style = modelSettings.hatchStyle || 'cross';
           
-          const spacing = 1.5; // mm spacing between hatch lines (in source pixels roughly)
-          // We need to map mm spacing to pixel spacing based on scale? 
-          // It's easier to generate in pixel space and transform.
+          // Calculate spacing in pixels based on Pen Diameter (nozzleDiameter) and Scale
+          // We want the physical gap between densest lines to match the pen diameter.
+          // Physical_Distance = Pixel_Distance * Scale
+          // Pixel_Distance = Pen_Diameter_mm / Scale
+          const mmPerPixel = modelSettings.scale > 0.0001 ? modelSettings.scale : 1;
+          const penWidthPx = printerSettings.nozzleDiameter / mmPerPixel;
           
-          // Let's assume procWidth maps to real width * scale.
-          // Or simpler: Generate lines in pixel space, then transform.
-          const pxSpacing = 4; // pixels
+          // Determine base spacing.
+          // Cross Style: 2 directional passes. Densest area has lines at 0 and 0.5 offsets per direction.
+          // Effective gap is 0.5 * Spacing. We want Gap = PenWidth. => Spacing = 2 * PenWidth.
+          // Linear Styles (Diagonal/etc): Densest area has 0, 0.25, 0.5, 0.75 offsets.
+          // Effective gap is 0.25 * Spacing. We want Gap = PenWidth => Spacing = 4 * PenWidth.
+          
+          let spacingMultiplier = 4.0;
+          if (style === 'cross') spacingMultiplier = 2.0;
+          
+          let pxSpacing = penWidthPx * spacingMultiplier;
+          
+          // Safety clamp for pixel processing to prevent freezing on extremely small scales
+          // 0.5px spacing is extremely dense for 512px image
+          if (pxSpacing < 0.5) pxSpacing = 0.5;
 
-          // Dark Pass (Cross)
-          const dark1 = generateHatchFromImage(imageData, 100, 45, pxSpacing, procWidth, procHeight);
-          const dark2 = generateHatchFromImage(imageData, 80, -45, pxSpacing, procWidth, procHeight);
+          const rawSegments: Segment[] = [];
           
-          // Mid Pass (Add more density to darks + cover mids)
-          const mid = generateHatchFromImage(imageData, 180, 45, pxSpacing * 1.5, procWidth, procHeight);
+          if (style === 'cross') {
+             // 1. Base Diagonal / (Light Gray+)
+             rawSegments.push(...generateHatchFromImage(imageData, 220, 45, pxSpacing, procWidth, procHeight));
+             // 2. Cross Diagonal \ (Mid Gray+)
+             rawSegments.push(...generateHatchFromImage(imageData, 140, -45, pxSpacing, procWidth, procHeight));
+             // 3. Dense Diagonal / (Dark Gray) - Offset
+             rawSegments.push(...generateHatchFromImage(imageData, 70, 45, pxSpacing, procWidth, procHeight, pxSpacing/2));
+             // 4. Dense Cross \ (Black) - Offset
+             rawSegments.push(...generateHatchFromImage(imageData, 30, -45, pxSpacing, procWidth, procHeight, pxSpacing/2));
+          } 
+          else if (style === 'diagonal') {
+             // 1. Base /
+             rawSegments.push(...generateHatchFromImage(imageData, 220, 45, pxSpacing, procWidth, procHeight));
+             // 2. Offset / (Mid)
+             rawSegments.push(...generateHatchFromImage(imageData, 140, 45, pxSpacing, procWidth, procHeight, pxSpacing/2));
+             // 3. Dense / (Dark)
+             rawSegments.push(...generateHatchFromImage(imageData, 60, 45, pxSpacing, procWidth, procHeight, pxSpacing/4));
+             rawSegments.push(...generateHatchFromImage(imageData, 60, 45, pxSpacing, procWidth, procHeight, pxSpacing*0.75));
+          }
+          else if (style === 'horizontal') {
+             rawSegments.push(...generateHatchFromImage(imageData, 220, 0, pxSpacing, procWidth, procHeight));
+             rawSegments.push(...generateHatchFromImage(imageData, 140, 0, pxSpacing, procWidth, procHeight, pxSpacing/2));
+             rawSegments.push(...generateHatchFromImage(imageData, 60, 0, pxSpacing, procWidth, procHeight, pxSpacing/4));
+             rawSegments.push(...generateHatchFromImage(imageData, 60, 0, pxSpacing, procWidth, procHeight, pxSpacing*0.75));
+          }
+          else if (style === 'vertical') {
+             rawSegments.push(...generateHatchFromImage(imageData, 220, 90, pxSpacing, procWidth, procHeight));
+             rawSegments.push(...generateHatchFromImage(imageData, 140, 90, pxSpacing, procWidth, procHeight, pxSpacing/2));
+             rawSegments.push(...generateHatchFromImage(imageData, 60, 90, pxSpacing, procWidth, procHeight, pxSpacing/4));
+             rawSegments.push(...generateHatchFromImage(imageData, 60, 90, pxSpacing, procWidth, procHeight, pxSpacing*0.75));
+          }
 
-          // Merge
-          const rawSegments = [...dark1, ...dark2, ...mid];
-          
           segmentsToPrint = rawSegments.map(s => ({
               p1: transformToBed(s.p1.x, s.p1.y, procWidth, procHeight),
               p2: transformToBed(s.p2.x, s.p2.y, procWidth, procHeight)

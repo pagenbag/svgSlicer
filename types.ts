@@ -16,12 +16,15 @@ export interface PrinterSettings {
   zHop: number; // mm
 }
 
+export type HatchStyle = 'cross' | 'diagonal' | 'horizontal' | 'vertical';
+
 export interface ModelSettings {
   targetHeight: number; // Total height in mm
   scale: number; // Percentage or scalar (1 = 100%)
   fillDensity: number; // 0-100 (Simplified for this app: line spacing)
   generateInfill: boolean;
   isPlotterMode: boolean; // New: 2D Plotter Mode
+  hatchStyle: HatchStyle; // New: Hatching pattern for images in plotter mode
 }
 
 export interface SlicerState {

@@ -89,10 +89,15 @@ const GCodeVisualization: React.FC<{
                  extrusionPoints.push(cx, cy, cz, x, y, z);
              } else {
                  // G1 without E increase -> Plot (XY move) or Travel?
-                 // In our plotter mode, drawing is G1 without E.
-                 // In standard 3D print, G1 without E is sometimes travel, but usually specific slow moves.
-                 // We will categorize this as Plot.
-                 plotPoints.push(cx, cy, cz, x, y, z);
+                 // In Plotter Mode, a G1 Z-only move is a "Pen Down" move, which is technically travel/positioning, not plotting.
+                 // We detect if this is a pure Z move.
+                 const isPureZ = Math.abs(z - cz) > 0.0001 && Math.abs(x - cx) < 0.0001 && Math.abs(y - cy) < 0.0001;
+
+                 if (isPureZ) {
+                     travelPoints.push(cx, cy, cz, x, y, z);
+                 } else {
+                     plotPoints.push(cx, cy, cz, x, y, z);
+                 }
              }
           }
 

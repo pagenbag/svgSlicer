@@ -33,7 +33,8 @@ export const generateHatchFromImage = (
   angleDeg: number, 
   spacing: number,
   width: number,
-  height: number
+  height: number,
+  offset: number = 0
 ): Segment[] => {
   const segments: Segment[] = [];
   const { data } = imageData;
@@ -48,7 +49,7 @@ export const generateHatchFromImage = (
   const start = -diag;
   const end = diag;
 
-  for (let r = start; r < end; r += spacing) {
+  for (let r = start + offset; r < end; r += spacing) {
     let segmentStart: Point | null = null;
 
     // Walk along the line

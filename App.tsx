@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Upload, Download, Settings, RefreshCw, Printer, AlertCircle, PenTool, Move3d } from 'lucide-react';
-import { PrinterSettings, ModelSettings, FileType } from './types';
+import { PrinterSettings, ModelSettings, FileType, HatchStyle } from './types';
 import { generateGCode } from './services/gcodeService';
 import GCodeViewer from './components/GCodeViewer';
 
@@ -28,6 +28,7 @@ const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   fillDensity: 100,
   generateInfill: true,
   isPlotterMode: true, // Default to Plotter per request
+  hatchStyle: 'cross',
 };
 
 export default function App() {
@@ -207,7 +208,12 @@ export default function App() {
                 <InputGroup label="Bed Width" value={printerSettings.bedWidth} onChange={(v: number) => setPrinterSettings({...printerSettings, bedWidth: v})} suffix="mm" step={10} />
                 <InputGroup label="Bed Depth" value={printerSettings.bedDepth} onChange={(v: number) => setPrinterSettings({...printerSettings, bedDepth: v})} suffix="mm" step={10} />
               </div>
-              <InputGroup label="Nozzle Diameter" value={printerSettings.nozzleDiameter} onChange={(v: number) => setPrinterSettings({...printerSettings, nozzleDiameter: v})} suffix="mm" />
+              <InputGroup 
+                  label={modelSettings.isPlotterMode ? "Pen Diameter" : "Nozzle Diameter"} 
+                  value={printerSettings.nozzleDiameter} 
+                  onChange={(v: number) => setPrinterSettings({...printerSettings, nozzleDiameter: v})} 
+                  suffix="mm" 
+              />
               
               {!modelSettings.isPlotterMode && (
                 <>
@@ -225,11 +231,11 @@ export default function App() {
                       <InputGroup label="Z-Hop Height" value={printerSettings.zHop} onChange={(v: number) => setPrinterSettings({...printerSettings, zHop: v})} suffix="mm" step={0.5} />
                       
                       <div className="p-3 bg-slate-800/50 rounded text-xs text-slate-400 border border-slate-800">
-                          <p>Plotter Mode Active</p>
-                          <ul className="list-disc list-inside mt-1">
-                              <li>Temperatures set to 0</li>
+                          <p className="font-semibold text-slate-300 mb-1">Plotter Mode Active</p>
+                          <ul className="list-disc list-inside space-y-1">
+                              <li>Temps disabled</li>
                               <li>Single Layer</li>
-                              <li>Z-Hop enabled</li>
+                              <li>Hatch spacing tied to Pen Diameter</li>
                           </ul>
                       </div>
                   </div>
@@ -250,7 +256,7 @@ export default function App() {
               
               <InputGroup label="XY Scale" value={modelSettings.scale} onChange={(v: number) => setModelSettings({...modelSettings, scale: v})} step={0.1} suffix="x" />
               
-              {!modelSettings.isPlotterMode && (
+              {!modelSettings.isPlotterMode ? (
                   <>
                     <div className="flex items-center justify-between mb-2">
                         <label className="text-xs text-slate-400 font-medium uppercase">Generate Infill</label>
@@ -260,6 +266,25 @@ export default function App() {
                         <InputGroup label="Infill Density" value={modelSettings.fillDensity} onChange={(v: number) => setModelSettings({...modelSettings, fillDensity: v})} suffix="%" step={1} min={1} />
                     )}
                   </>
+              ) : (
+                  // Hatch Style selector for Plotter Mode (Only relevant for Images really, but exposed for logic)
+                  fileType === 'image' && (
+                    <div className="flex flex-col gap-1 mb-3">
+                        <label className="text-xs text-slate-400 font-medium uppercase tracking-wider">Hatch Pattern</label>
+                        <div className="flex items-center bg-slate-800 rounded px-3 py-2 border border-slate-700 focus-within:border-blue-500 transition-colors">
+                            <select 
+                                value={modelSettings.hatchStyle} 
+                                onChange={(e) => setModelSettings({...modelSettings, hatchStyle: e.target.value as HatchStyle})}
+                                className="bg-transparent text-sm text-white w-full focus:outline-none cursor-pointer"
+                            >
+                                <option value="cross">Cross Hatch</option>
+                                <option value="diagonal">Diagonal</option>
+                                <option value="horizontal">Horizontal</option>
+                                <option value="vertical">Vertical</option>
+                            </select>
+                        </div>
+                    </div>
+                  )
               )}
             </div>
           </div>
