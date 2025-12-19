@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useEffect, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
+import { Eye, EyeOff } from 'lucide-react';
 import * as THREE from 'three';
 
 interface Bounds {
@@ -16,15 +17,17 @@ interface GCodeViewerProps {
 
 const GCodeVisualization: React.FC<{ 
   gcode: string; 
-  onBoundsCalculated: (bounds: Bounds | null) => void 
-}> = ({ gcode, onBoundsCalculated }) => {
+  onBoundsCalculated: (bounds: Bounds | null) => void;
+  visibleTypes: { extrusion: boolean, plot: boolean, travel: boolean };
+}> = ({ gcode, onBoundsCalculated, visibleTypes }) => {
   const previousGcode = useRef<string>('');
 
-  const { geometry, bounds } = useMemo(() => {
-    if (!gcode) return { geometry: null, bounds: null };
+  const { extrusionGeo, plotGeo, travelGeo, bounds } = useMemo(() => {
+    if (!gcode) return { extrusionGeo: null, plotGeo: null, travelGeo: null, bounds: null };
 
-    const lines: number[] = [];
-    const colors: number[] = [];
+    const extrusionPoints: number[] = [];
+    const plotPoints: number[] = [];
+    const travelPoints: number[] = [];
     
     // Track bounds
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -36,26 +39,25 @@ const GCodeVisualization: React.FC<{
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
     };
 
-    // Simple state machine for the parser
-    let x = 0, y = 0, z = 0;
-    // Current positions
-    let cx = 0, cy = 0, cz = 0;
+    // Parser State
+    let x = 0, y = 0, z = 0, e = 0;
+    let cx = 0, cy = 0, cz = 0, ce = 0;
+    let isRelative = false; // G91 support roughly
     
     const splitLines = gcode.split('\n');
     
-    // Reusable objects
-    const colorExtrude = new THREE.Color('#ef4444'); // Red for extrusion
-    const colorTravel = new THREE.Color('#3b82f6'); // Blue for travel
-
     for (const line of splitLines) {
       const parts = line.split(';')[0].trim().toUpperCase().split(' ');
       if (parts.length === 0 || parts[0] === '') continue;
 
       const cmd = parts[0];
       
+      if (cmd === 'G90') isRelative = false;
+      if (cmd === 'G91') isRelative = true;
+
       if (cmd === 'G0' || cmd === 'G1') {
-        let isExtruding = false;
         let hasMove = false;
+        let newE = e; // Check for E change
 
         // Parse params
         for (let i = 1; i < parts.length; i++) {
@@ -64,34 +66,39 @@ const GCodeVisualization: React.FC<{
           if (isNaN(val)) continue;
 
           switch (p[0]) {
-            case 'X': x = val; hasMove = true; break;
-            case 'Y': y = val; hasMove = true; break;
-            case 'Z': z = val; hasMove = true; break;
+            case 'X': x = isRelative ? x + val : val; hasMove = true; break;
+            case 'Y': y = isRelative ? y + val : val; hasMove = true; break;
+            case 'Z': z = isRelative ? z + val : val; hasMove = true; break;
             case 'E': 
-              isExtruding = true; 
+              newE = isRelative ? e + val : val; 
               break;
           }
         }
 
         if (hasMove) {
-          lines.push(cx, cy, cz);
-          lines.push(x, y, z);
-          
           updateBounds(cx, cy, cz);
           updateBounds(x, y, z);
 
-          // Color
-          if (isExtruding && cmd === 'G1') {
-             colors.push(colorExtrude.r, colorExtrude.g, colorExtrude.b);
-             colors.push(colorExtrude.r, colorExtrude.g, colorExtrude.b);
+          // Determine Line Type
+          if (cmd === 'G0') {
+             travelPoints.push(cx, cy, cz, x, y, z);
           } else {
-             // Travel
-             colors.push(colorTravel.r, colorTravel.g, colorTravel.b);
-             colors.push(colorTravel.r, colorTravel.g, colorTravel.b);
+             // G1
+             if (newE > ce) {
+                 // Extrusion
+                 extrusionPoints.push(cx, cy, cz, x, y, z);
+             } else {
+                 // G1 without E increase -> Plot (XY move) or Travel?
+                 // In our plotter mode, drawing is G1 without E.
+                 // In standard 3D print, G1 without E is sometimes travel, but usually specific slow moves.
+                 // We will categorize this as Plot.
+                 plotPoints.push(cx, cy, cz, x, y, z);
+             }
           }
 
           // Update current pos
-          cx = x; cy = y; cz = z;
+          cx = x; cy = y; cz = z; ce = newE;
+          e = newE;
         }
       }
       else if (cmd === 'G28') {
@@ -100,16 +107,23 @@ const GCodeVisualization: React.FC<{
       }
     }
     
-    // Handle case where no moves generated geometry
     const calculatedBounds = (minX !== Infinity) ? {
         min: new THREE.Vector3(minX, minY, minZ),
         max: new THREE.Vector3(maxX, maxY, maxZ)
     } : null;
 
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    return { geometry: geo, bounds: calculatedBounds };
+    const createGeo = (pts: number[]) => {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+        return g;
+    }
+
+    return { 
+        extrusionGeo: createGeo(extrusionPoints), 
+        plotGeo: createGeo(plotPoints), 
+        travelGeo: createGeo(travelPoints), 
+        bounds: calculatedBounds 
+    };
   }, [gcode]);
 
   useEffect(() => {
@@ -119,12 +133,25 @@ const GCodeVisualization: React.FC<{
      }
   }, [bounds, gcode, onBoundsCalculated]);
 
-  if (!geometry) return null;
-
   return (
-    <lineSegments geometry={geometry}>
-      <lineBasicMaterial vertexColors opacity={0.8} transparent linewidth={1} />
-    </lineSegments>
+    <>
+      {visibleTypes.extrusion && extrusionGeo && (
+        <lineSegments geometry={extrusionGeo}>
+            <lineBasicMaterial color="#ef4444" linewidth={1} opacity={1} transparent={false} />
+        </lineSegments>
+      )}
+      {visibleTypes.plot && plotGeo && (
+        <lineSegments geometry={plotGeo}>
+             {/* Use a distinct color for Plot (e.g., Green or Teal) */}
+            <lineBasicMaterial color="#10b981" linewidth={1} opacity={1} transparent={false} />
+        </lineSegments>
+      )}
+      {visibleTypes.travel && travelGeo && (
+        <lineSegments geometry={travelGeo}>
+            <lineBasicMaterial color="#3b82f6" linewidth={1} opacity={0.4} transparent />
+        </lineSegments>
+      )}
+    </>
   );
 };
 
@@ -146,9 +173,14 @@ const CameraSetup: React.FC<{ cx: number, cy: number }> = ({ cx, cy }) => {
 
 const GCodeViewer: React.FC<GCodeViewerProps> = ({ gcode, bedWidth, bedDepth }) => {
   const [bounds, setBounds] = useState<Bounds | null>(null);
+  const [visibleTypes, setVisibleTypes] = useState({ extrusion: true, plot: true, travel: true });
 
   const bedCenterX = bedWidth / 2;
   const bedCenterY = bedDepth / 2;
+
+  const toggle = (key: keyof typeof visibleTypes) => {
+      setVisibleTypes(p => ({...p, [key]: !p[key]}));
+  };
 
   return (
     <div className="w-full h-full bg-slate-950 relative rounded-lg overflow-hidden border border-slate-800 shadow-inner group">
@@ -158,7 +190,7 @@ const GCodeViewer: React.FC<GCodeViewerProps> = ({ gcode, bedWidth, bedDepth }) 
         <pointLight position={[bedWidth, bedDepth, 200]} intensity={0.8} />
         <pointLight position={[0, 0, 200]} intensity={0.5} />
         
-        <GCodeVisualization gcode={gcode} onBoundsCalculated={setBounds} />
+        <GCodeVisualization gcode={gcode} onBoundsCalculated={setBounds} visibleTypes={visibleTypes} />
         
         {/* Bed Visualization */}
         <group position={[bedCenterX, bedCenterY, 0]}>
@@ -186,15 +218,34 @@ const GCodeViewer: React.FC<GCodeViewerProps> = ({ gcode, bedWidth, bedDepth }) 
         <OrbitControls makeDefault target={[bedCenterX, bedCenterY, 0]} />
       </Canvas>
       
-      {/* HUD: Legend */}
-      <div className="absolute top-4 right-4 pointer-events-none opacity-50 group-hover:opacity-100 transition-opacity">
-          <div className="flex flex-col gap-2 bg-slate-900/80 p-3 rounded text-xs text-white backdrop-blur border border-slate-700/50">
-              <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 bg-red-500 rounded-full"></span> Extrusion
-              </div>
-              <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 bg-blue-500 rounded-full"></span> Travel
-              </div>
+      {/* HUD: Legend & Toggles */}
+      <div className="absolute top-4 right-4 pointer-events-auto flex flex-col gap-2">
+          <div className="flex flex-col gap-2 bg-slate-900/90 p-3 rounded text-xs text-white backdrop-blur border border-slate-700/50 shadow-lg">
+              <div className="font-semibold border-b border-slate-700 pb-1 mb-1 text-slate-400 uppercase tracking-wider text-[10px]">Visibility</div>
+              
+              <button onClick={() => toggle('extrusion')} className="flex items-center justify-between gap-3 hover:bg-slate-800 p-1 rounded transition-colors group/btn">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 bg-red-500 rounded-full shadow-[0_0_5px_rgba(239,68,68,0.5)]"></span> 
+                    <span>Extrusion</span>
+                  </div>
+                  {visibleTypes.extrusion ? <Eye className="w-3 h-3 text-slate-400" /> : <EyeOff className="w-3 h-3 text-slate-600" />}
+              </button>
+
+              <button onClick={() => toggle('plot')} className="flex items-center justify-between gap-3 hover:bg-slate-800 p-1 rounded transition-colors group/btn">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 bg-emerald-500 rounded-full shadow-[0_0_5px_rgba(16,185,129,0.5)]"></span> 
+                    <span>Plot (2D)</span>
+                  </div>
+                  {visibleTypes.plot ? <Eye className="w-3 h-3 text-slate-400" /> : <EyeOff className="w-3 h-3 text-slate-600" />}
+              </button>
+
+              <button onClick={() => toggle('travel')} className="flex items-center justify-between gap-3 hover:bg-slate-800 p-1 rounded transition-colors group/btn">
+                  <div className="flex items-center gap-2">
+                    <span className="w-3 h-3 bg-blue-500 rounded-full shadow-[0_0_5px_rgba(59,130,246,0.5)]"></span> 
+                    <span>Travel</span>
+                  </div>
+                  {visibleTypes.travel ? <Eye className="w-3 h-3 text-slate-400" /> : <EyeOff className="w-3 h-3 text-slate-600" />}
+              </button>
           </div>
       </div>
 

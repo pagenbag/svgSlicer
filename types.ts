@@ -13,6 +13,7 @@ export interface PrinterSettings {
   zOffset: number; // mm
   bedWidth: number; // mm
   bedDepth: number; // mm
+  zHop: number; // mm
 }
 
 export interface ModelSettings {
@@ -20,6 +21,7 @@ export interface ModelSettings {
   scale: number; // Percentage or scalar (1 = 100%)
   fillDensity: number; // 0-100 (Simplified for this app: line spacing)
   generateInfill: boolean;
+  isPlotterMode: boolean; // New: 2D Plotter Mode
 }
 
 export interface SlicerState {
@@ -39,3 +41,5 @@ export interface Segment {
   p1: Point;
   p2: Point;
 }
+
+export type FileType = 'svg' | 'image';

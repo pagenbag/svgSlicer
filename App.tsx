@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, Download, Settings, RefreshCw, Printer, AlertCircle } from 'lucide-react';
-import { PrinterSettings, ModelSettings } from './types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Upload, Download, Settings, RefreshCw, Printer, AlertCircle, PenTool, Move3d } from 'lucide-react';
+import { PrinterSettings, ModelSettings, FileType } from './types';
 import { generateGCode } from './services/gcodeService';
 import GCodeViewer from './components/GCodeViewer';
 
@@ -19,6 +19,7 @@ const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   zOffset: 0,
   bedWidth: 220,
   bedDepth: 220,
+  zHop: 2.0, // Default Z-Hop for plotter
 };
 
 const DEFAULT_MODEL_SETTINGS: ModelSettings = {
@@ -26,39 +27,71 @@ const DEFAULT_MODEL_SETTINGS: ModelSettings = {
   scale: 1.0,
   fillDensity: 100,
   generateInfill: true,
+  isPlotterMode: true, // Default to Plotter per request
 };
 
 export default function App() {
-  const [svgContent, setSvgContent] = useState<string | null>(null);
+  const [content, setContent] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string>('');
+  const [fileType, setFileType] = useState<FileType>('svg');
+  
   const [printerSettings, setPrinterSettings] = useState<PrinterSettings>(DEFAULT_PRINTER_SETTINGS);
   const [modelSettings, setModelSettings] = useState<ModelSettings>(DEFAULT_MODEL_SETTINGS);
   const [prefixGCode, setPrefixGCode] = useState<string>('; Auto-Bed Leveling\nG29');
   const [gcode, setGcode] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const processFile = (file: File) => {
+    setFileName(file.name);
+    const type = file.type.includes('svg') ? 'svg' : 'image';
+    setFileType(type);
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        setContent(event.target.result as string);
+        setError(null);
+        // Reset GCode to trigger regeneration effect
+        setGcode(''); 
+      }
+    };
+    reader.readAsDataURL(file); // DataURL works for both Image src and Three SVGLoader
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setFileName(file.name);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setSvgContent(event.target.result as string);
-          setError(null);
-        }
-      };
-      reader.readAsText(file);
-    }
+    if (file) processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(true);
+  };
+  
+  const handleDragLeave = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+  };
+  
+  const handleDrop = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      const file = e.dataTransfer.files?.[0];
+      if (file && (file.type.includes('svg') || file.type.includes('image'))) {
+          processFile(file);
+      } else {
+          setError('Please drop an SVG, PNG, or JPG file.');
+      }
   };
 
   const handleGenerate = useCallback(async () => {
-    if (!svgContent) return;
+    if (!content) return;
     setIsGenerating(true);
     setError(null);
     try {
-      const result = await generateGCode(svgContent, printerSettings, modelSettings, prefixGCode);
+      const result = await generateGCode(content, fileType, printerSettings, modelSettings, prefixGCode);
       setGcode(result);
     } catch (err: any) {
       setError(err.message || 'Failed to generate G-Code');
@@ -66,14 +99,14 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [svgContent, printerSettings, modelSettings, prefixGCode]);
+  }, [content, fileType, printerSettings, modelSettings, prefixGCode]);
 
-  // Auto-generate when SVG loads for the first time
+  // Auto-generate when Content loads for the first time
   useEffect(() => {
-    if (svgContent && !gcode) {
+    if (content && !gcode && !isGenerating) {
       handleGenerate();
     }
-  }, [svgContent, handleGenerate, gcode]);
+  }, [content, handleGenerate, gcode, isGenerating]);
 
   const downloadGCode = () => {
     const blob = new Blob([gcode], { type: 'text/plain' });
@@ -116,16 +149,31 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-4">
+          <div className="flex items-center bg-slate-800 rounded-lg p-1 border border-slate-700 mr-2">
+             <button 
+                onClick={() => setModelSettings({...modelSettings, isPlotterMode: false})}
+                className={`px-3 py-1.5 rounded flex items-center gap-2 text-xs font-medium transition-all ${!modelSettings.isPlotterMode ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+             >
+                 <Move3d className="w-3 h-3" /> 3D Print
+             </button>
+             <button 
+                onClick={() => setModelSettings({...modelSettings, isPlotterMode: true})}
+                className={`px-3 py-1.5 rounded flex items-center gap-2 text-xs font-medium transition-all ${modelSettings.isPlotterMode ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+             >
+                 <PenTool className="w-3 h-3" /> 2D Plotter
+             </button>
+          </div>
+
           <label className="cursor-pointer bg-slate-800 hover:bg-slate-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-slate-700 flex items-center gap-2">
             <Upload className="w-4 h-4" />
-            <span>{fileName || "Upload SVG"}</span>
-            <input type="file" accept=".svg" className="hidden" onChange={handleFileUpload} />
+            <span>{fileName ? (fileName.length > 15 ? fileName.substring(0,12) + '...' : fileName) : "Upload File"}</span>
+            <input type="file" accept=".svg,.jpg,.jpeg,.png" className="hidden" onChange={handleFileUpload} />
           </label>
           
           <button 
             onClick={handleGenerate}
-            disabled={!svgContent || isGenerating}
-            className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${!svgContent ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20'}`}
+            disabled={!content || isGenerating}
+            className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${!content ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20'}`}
           >
             <RefreshCw className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
             Regenerate
@@ -137,7 +185,7 @@ export default function App() {
             className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${!gcode ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'}`}
           >
             <Download className="w-4 h-4" />
-            Download G-Code
+            Download
           </button>
         </div>
       </header>
@@ -160,11 +208,32 @@ export default function App() {
                 <InputGroup label="Bed Depth" value={printerSettings.bedDepth} onChange={(v: number) => setPrinterSettings({...printerSettings, bedDepth: v})} suffix="mm" step={10} />
               </div>
               <InputGroup label="Nozzle Diameter" value={printerSettings.nozzleDiameter} onChange={(v: number) => setPrinterSettings({...printerSettings, nozzleDiameter: v})} suffix="mm" />
-              <InputGroup label="Filament Diameter" value={printerSettings.filamentDiameter} onChange={(v: number) => setPrinterSettings({...printerSettings, filamentDiameter: v})} suffix="mm" />
-              <InputGroup label="Layer Height" value={printerSettings.layerHeight} onChange={(v: number) => setPrinterSettings({...printerSettings, layerHeight: v})} suffix="mm" />
-              <InputGroup label="Temp (Nozzle)" value={printerSettings.temperature} onChange={(v: number) => setPrinterSettings({...printerSettings, temperature: v})} suffix="°C" step={1} />
-              <InputGroup label="Temp (Bed)" value={printerSettings.bedTemperature} onChange={(v: number) => setPrinterSettings({...printerSettings, bedTemperature: v})} suffix="°C" step={1} />
+              
+              {!modelSettings.isPlotterMode && (
+                <>
+                  <InputGroup label="Filament" value={printerSettings.filamentDiameter} onChange={(v: number) => setPrinterSettings({...printerSettings, filamentDiameter: v})} suffix="mm" />
+                  <InputGroup label="Layer Height" value={printerSettings.layerHeight} onChange={(v: number) => setPrinterSettings({...printerSettings, layerHeight: v})} suffix="mm" />
+                  <InputGroup label="Temp (Nozzle)" value={printerSettings.temperature} onChange={(v: number) => setPrinterSettings({...printerSettings, temperature: v})} suffix="°C" step={1} />
+                  <InputGroup label="Temp (Bed)" value={printerSettings.bedTemperature} onChange={(v: number) => setPrinterSettings({...printerSettings, bedTemperature: v})} suffix="°C" step={1} />
+                </>
+              )}
+              
               <InputGroup label="Print Speed" value={printerSettings.printSpeed / 60} onChange={(v: number) => setPrinterSettings({...printerSettings, printSpeed: v * 60})} suffix="mm/s" step={1} />
+              
+              {modelSettings.isPlotterMode && (
+                  <div className="mt-2 space-y-2">
+                      <InputGroup label="Z-Hop Height" value={printerSettings.zHop} onChange={(v: number) => setPrinterSettings({...printerSettings, zHop: v})} suffix="mm" step={0.5} />
+                      
+                      <div className="p-3 bg-slate-800/50 rounded text-xs text-slate-400 border border-slate-800">
+                          <p>Plotter Mode Active</p>
+                          <ul className="list-disc list-inside mt-1">
+                              <li>Temperatures set to 0</li>
+                              <li>Single Layer</li>
+                              <li>Z-Hop enabled</li>
+                          </ul>
+                      </div>
+                  </div>
+              )}
             </div>
           </div>
 
@@ -175,16 +244,22 @@ export default function App() {
               Model Settings
             </h2>
             <div className="space-y-1">
-              <InputGroup label="Target Height (Z)" value={modelSettings.targetHeight} onChange={(v: number) => setModelSettings({...modelSettings, targetHeight: v})} suffix="mm" />
+              {!modelSettings.isPlotterMode && (
+                <InputGroup label="Target Height (Z)" value={modelSettings.targetHeight} onChange={(v: number) => setModelSettings({...modelSettings, targetHeight: v})} suffix="mm" />
+              )}
+              
               <InputGroup label="XY Scale" value={modelSettings.scale} onChange={(v: number) => setModelSettings({...modelSettings, scale: v})} step={0.1} suffix="x" />
               
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs text-slate-400 font-medium uppercase">Generate Infill</label>
-                <input type="checkbox" checked={modelSettings.generateInfill} onChange={(e) => setModelSettings({...modelSettings, generateInfill: e.target.checked})} className="accent-blue-500 h-4 w-4 rounded border-slate-700 bg-slate-800" />
-              </div>
-              
-              {modelSettings.generateInfill && (
-                 <InputGroup label="Infill Density" value={modelSettings.fillDensity} onChange={(v: number) => setModelSettings({...modelSettings, fillDensity: v})} suffix="%" step={1} min={1} />
+              {!modelSettings.isPlotterMode && (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs text-slate-400 font-medium uppercase">Generate Infill</label>
+                        <input type="checkbox" checked={modelSettings.generateInfill} onChange={(e) => setModelSettings({...modelSettings, generateInfill: e.target.checked})} className="accent-blue-500 h-4 w-4 rounded border-slate-700 bg-slate-800" />
+                    </div>
+                    {modelSettings.generateInfill && (
+                        <InputGroup label="Infill Density" value={modelSettings.fillDensity} onChange={(v: number) => setModelSettings({...modelSettings, fillDensity: v})} suffix="%" step={1} min={1} />
+                    )}
+                  </>
               )}
             </div>
           </div>
@@ -206,7 +281,18 @@ export default function App() {
         </aside>
 
         {/* Viewer Area */}
-        <main className="flex-1 p-6 relative flex flex-col min-w-0">
+        <main 
+            className="flex-1 p-6 relative flex flex-col min-w-0 transition-colors"
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+        >
+          {isDragging && (
+              <div className="absolute inset-0 z-50 bg-blue-500/20 backdrop-blur-sm border-4 border-blue-500 border-dashed m-4 rounded-xl flex items-center justify-center">
+                  <div className="text-blue-200 text-2xl font-bold">Drop file to load</div>
+              </div>
+          )}
+
           {error && (
             <div className="absolute top-6 left-6 right-6 z-20 bg-red-500/10 border border-red-500/50 text-red-200 p-4 rounded-lg flex items-center gap-3 backdrop-blur-md">
               <AlertCircle className="w-5 h-5 text-red-500" />
@@ -214,11 +300,11 @@ export default function App() {
             </div>
           )}
 
-          {!svgContent && !gcode && (
+          {!content && !gcode && (
              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
                 <div className="text-center space-y-4 opacity-50">
                     <Upload className="w-16 h-16 mx-auto text-slate-600" />
-                    <p className="text-xl font-medium text-slate-400">Upload an SVG to start slicing</p>
+                    <p className="text-xl font-medium text-slate-400">Drag & Drop SVG or Image here</p>
                 </div>
              </div>
           )}
@@ -230,6 +316,7 @@ export default function App() {
           <div className="mt-4 flex justify-between items-center text-xs text-slate-500">
              <div>
                 {gcode ? `${gcode.split('\n').length} lines of G-Code generated` : 'Ready'}
+                {fileType === 'image' && ' (Raster Processing)'}
              </div>
              <div>
                 Use Left Click to Rotate • Right Click to Pan • Scroll to Zoom
