@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Upload, Download, Settings, RefreshCw, Printer, AlertCircle, PenTool, Move3d } from 'lucide-react';
+import { Upload, Download, Settings, RefreshCw, Printer, AlertCircle, PenTool, Move3d, Box } from 'lucide-react';
 import { PrinterSettings, ModelSettings, FileType, HatchStyle } from './types';
 import { generateGCode } from './services/gcodeService';
+import { generateSTL } from './services/stlService';
 import GCodeViewer from './components/GCodeViewer';
 
 const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
@@ -58,7 +59,14 @@ export default function App() {
         setGcode(''); 
       }
     };
-    reader.readAsDataURL(file); // DataURL works for both Image src and Three SVGLoader
+    
+    // SVGs must be read as text for the loader to parse the XML string.
+    // Images must be read as DataURL for the Image object to load src.
+    if (type === 'svg') {
+        reader.readAsText(file);
+    } else {
+        reader.readAsDataURL(file);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,6 +129,23 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const downloadSTL = async () => {
+    if (!content || fileType !== 'svg') return;
+    try {
+      const blob = generateSTL(content, modelSettings);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName ? `${fileName.split('.')[0]}.stl` : 'model.stl';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err.message || 'Failed to generate STL');
+    }
+  };
+
   const InputGroup = ({ label, value, onChange, step = 0.1, min = 0, suffix = '' }: any) => (
     <div className="flex flex-col gap-1 mb-3">
       <label className="text-xs text-slate-400 font-medium uppercase tracking-wider">{label}</label>
@@ -180,14 +205,28 @@ export default function App() {
             Regenerate
           </button>
           
-          <button 
-            onClick={downloadGCode}
-            disabled={!gcode}
-            className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${!gcode ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'}`}
-          >
-            <Download className="w-4 h-4" />
-            Download
-          </button>
+          <div className="flex gap-2">
+            {fileType === 'svg' && (
+              <button 
+                onClick={downloadSTL}
+                disabled={!content}
+                className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${!content ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-500/20'}`}
+                title="Download as 3D Model (STL)"
+              >
+                <Box className="w-4 h-4" />
+                STL
+              </button>
+            )}
+
+            <button 
+              onClick={downloadGCode}
+              disabled={!gcode}
+              className={`px-4 py-2 rounded-lg font-medium text-sm flex items-center gap-2 transition-all ${!gcode ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'}`}
+            >
+              <Download className="w-4 h-4" />
+              GCode
+            </button>
+          </div>
         </div>
       </header>
 

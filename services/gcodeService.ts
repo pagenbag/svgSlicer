@@ -143,6 +143,10 @@ export const generateGCode = async (
         });
       });
       
+      if (shapes.length === 0 || minX === Infinity) {
+          throw new Error("No paths found in SVG. Ensure it is a valid SVG with path elements.");
+      }
+      
       const svgWidth = maxX - minX;
       const svgHeight = maxY - minY;
       
